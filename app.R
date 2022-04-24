@@ -20,14 +20,14 @@ options("rgdal_show_exportToProj4_warnings"="none")
 library(rgdal)
 library(data.table)
 #predefines
-company_data <- read.delim(file="0.tsv", sep="\t", fileEncoding = "UTF-8")
+# company_data <- read.delim(file="0.tsv", sep="\t", fileEncoding = "UTF-8")
 # community_data <- read.delim(file="CommAreas.tsv", sep="\t", fileEncoding = "UTF-8")
 #parse dates into column called date
-company_data$date <- make_datetime(year= 2019
-                           ,month = company_data$Trip.Start.Month
-                           ,day = company_data$Trip.Start.Day
-                           # ,hour = company_data$Trip.Start.Hour
-)
+# company_data$date <- make_datetime(year= 2019
+#                            ,month = company_data$Trip.Start.Month
+#                            ,day = company_data$Trip.Start.Day
+#                            # ,hour = company_data$Trip.Start.Hour
+# )
 
 geoj <-readOGR("Community.geojson")
 geoj$data <- geoj$data[c(5),]
@@ -45,28 +45,56 @@ colnames(myfiles) <- fixed_names
 # y <- aggregate(company_data, by=list(company_data$Trip.Start.Day, company_data$Trip.Start.Month),sum)
 # y <- ymd(company_data$date)
 
-ui <- dashboardPage(
-  dashboardHeader(title = "Basic dashboard"),
-  dashboardSidebar(),
-  dashboardBody(
-    # Application title
-    titlePanel(""),
-
-    # Sidebar with a slider input for number of bins 
-    sidebarLayout(
-        sidebarPanel(),
-
-        # Show a plot of the generated distribution
-        mainPanel(
+# ui <- dashboardPage(
+#   dashboardHeader(),
+#   dashboardSidebar(radioButtons("to_from", "Select to see:",
+#                                 choices = list("Inflow to" = "1", "Output to" = "2"),
+#                                 selected = "1",
+#                                 inline=TRUE)
+#                    ),
+#   dashboardBody(
+#         mainPanel(
+#           column(8,fluidRow(plotOutput("map_chart"),height=200)),
+#           column(4,leafletOutput("Chicago")))
+#           
+#           
+#         )
           # verbatimTextOutput("test1"),
-          plotOutput("bar_chart"),
-          leafletOutput("Chicago"),
-          radioButtons("to_from", "Select to see:",
-                       choices = list("Inflow to" = "1", "Output to" = "2"),
-                       selected = "1",
-                       inline=TRUE),
-        )
-    )
+        #   plotOutput("day_chart"),
+        #   leafletOutput("Chicago"),
+        #   radioButtons("to_from", "Select to see:",
+        #                choices = list("Inflow to" = "1", "Output to" = "2"),
+        #                selected = "1",
+        #                inline=TRUE),
+        #   plotOutput("map_chart")
+        # )
+ui <- fillPage(
+  fillRow(
+    fillCol(plotOutput("map_chart",height ="100%"),
+            actionButton("show", "About"),
+            flex = c(95,5)
+            ),
+  fillCol(leafletOutput("Chicago", height = "100%")
+          ),
+  fillCol(radioButtons("to_from", "Select to see:",
+                                      choices = list("Inflow to" = "1", "Output to" = "2"),
+                                      selected = "1",
+                                      inline=TRUE
+                       ),
+          radioButtons("miles", "Units",
+                       choices = list("Miles" = "1",
+                                      "Km" = "2")
+                       ),
+          actionButton("City", "City of Chicago")
+          
+          ),
+  fillCol(plotOutput("day_chart"),
+          plotOutput("hour_chart"),
+          plotOutput("week_chart")
+          ),
+  fillCol(plotOutput("month_chart"),
+          plotOutput("histo_miles_chart"),
+          plotOutput("histo_time_chart"))
   )
 )
 
@@ -74,7 +102,11 @@ ui <- dashboardPage(
 server <- function(input, output) {
 
     com_areas <- reactive({
-      drop_offs <- subset(myfiles, Pickup.Community.Area==strtoi(event()$id))$Dropoff.Community.Area
+      #update inflow or outflow
+      drop_offs <- switch(input$to_from,
+             "1" = subset(myfiles, Pickup.Community.Area==strtoi(event()$id))$Dropoff.Community.Area,
+             "2" = subset(myfiles, Dropoff.Community.Area==strtoi(event()$id))$Pickup.Community.Area
+      )
       drop_offs <- factor(drop_offs, levels=c(1:77))
       temp <- table(drop_offs)
       temp <- (temp/sum(temp))*100
@@ -88,50 +120,77 @@ server <- function(input, output) {
       })
     
     
+    company_data <- reactive({
+      small_set <- switch(input$to_from,
+             "1" = subset(myfiles, Pickup.Community.Area==strtoi(event()$id)),
+             "2" = subset(myfiles, Dropoff.Community.Area==strtoi(event()$id))
+      )
+               
+      date <- make_date(
+        year= 2019
+                                         ,month = small_set$Trip.Start.Month
+                                         ,day = small_set$Trip.Start.Day
+                            )
+      data.frame(date,small_set$Trip.Start.Hour,small_set$Trip.Miles,small_set$Trip.Seconds)
+    })
+    
+    
     
     output$day_chart <- renderPlot({
-      y <- table(company_data$date)
-      x <- seq(as.Date("2019/1/1"), as.Date("2019/12/31"), "days")
-      day_chart_data <- data.frame(x,y)
-      ggplot(day_chart_data, aes(x=x, y=y)) + geom_bar(stat="identity", fill="steelblue") +
-        labs(title = "Ridership from 2001 to 2021 by Day", x="Date", y = "Ridership") +
-        scale_y_continuous(labels = comma)
+      x <- data.table( as.character(seq(ymd("2019/1/1"), ymd("2019/12/31"), "1 day")))
+      colnames(x)<-"y"
+      y<-company_data()$date
+      # y<-factor(y, levels=x)
+      y <- data.table(table(y))
+      y <- merge(x,y,all.x=TRUE)
+      # day_chart_data <- data.frame(x,y)
+      y$y <- ymd(y$y)
+      ggplot(y, aes(x=y, y=N)) + geom_bar(stat="identity", fill="steelblue") +
+        labs(title = "Ridership For the Year of 2019", x="Date", y = "Ridership")+
+        theme(axis.text.x = element_text(angle=45))+
+        scale_x_date(labels = date_format("%m-%d-%Y"), date_breaks = "30 days")
     })
     
     output$hour_chart <- renderPlot({
-      y <- table(company_data$Trip.Start.Hour)
+      y <- table(company_data()$small_set.Trip.Start.Hour)
       x <- c(0:23)
       hour_chart_data <- data.frame(x,y)
       ggplot(hour_chart_data, aes(x=x, y=y)) + geom_bar(stat="identity", fill="steelblue") +
-        labs(title = "Ridership from 2001 to 2021 by Day", x="Date", y = "Ridership") +
+        labs(title = "Ridership For the Year of 2019 by Hour", x="Hour", y = "Ridership") +
         scale_y_continuous(labels = comma)
     })
-    
+
     output$week_chart <- renderPlot({
-      y <- table(wday(company_data$date))
+      y <- table(wday(company_data()$date))
       x <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday","Sunday")
       weekday_chart_data <- data.frame(x,y)
       ggplot(weekday_chart_data, aes(x=x, y=y)) + geom_bar(stat="identity", fill="steelblue") +
-        labs(title = "Ridership from 2001 to 2021 by Day", x="Date", y = "Ridership") +
+        labs(title = "Ridership For the Year of 2019 by Day of the Week", x="Day", y = "Ridership") +
         scale_y_continuous(labels = comma)
     })
-    
+
     output$month_chart <- renderPlot({
-      y <- table(month(company_data$Trip.Start.Month))
+      y <- table(month(company_data()$date))
       x<- month.name[c(1:12)]
       month_chart_data <- data.frame(x,y)
       ggplot(month_chart_data, aes(x=x, y=y)) + geom_bar(stat="identity", fill="steelblue") +
-        labs(title = "Ridership from 2001 to 2021 by Day", x="Date", y = "Ridership") +
+        labs(title = "Ridership for the Year of 2019 by Month", x="Month", y = "Ridership") +
         scale_y_continuous(labels = comma)
     })
-    
+
     output$histo_miles_chart <- renderPlot({
-      ggplot(company_data, aes(x=Trip.Miles)) + geom_dotplot()
+      x <- switch(input$miles,
+                  "1" = company_data()$small_set.Trip.Miles,
+                  "2" = 1.60934*(company_data()$small_set.Trip.Miles)
+      )
+      ggplot(company_data(), aes(x=x)) + geom_histogram() +
+        labs(title = "Distances traveled for the Year of 2019", x="Distance", y = "Count")
       # max(company_data$Trip.Miles)
     })
-    
+
     output$histo_time_chart <- renderPlot({
-      ggplot(company_data, aes(x=Trip.Seconds)) + geom_dotplot()
+      ggplot(company_data(), aes(x=small_set.Trip.Seconds)) + geom_histogram() +
+        labs(title = "Duration of Trips traveled for the Year of 2019", x="Duration", y = "Count")
     })
     
     output$Chicago <-renderLeaflet({
@@ -177,6 +236,23 @@ server <- function(input, output) {
     })
     # output$test1 <- renderPrint(event())
     
+    output$map_chart <- renderPlot({
+      x <- com_areas()@data$community
+      y <- com_areas()@data$value
+      plot <- data.frame(x,y)
+      ggplot(plot, aes(x=x,y=y)) +
+        geom_bar(stat="identity", fill="steelblue") +
+        theme(axis.text.x = element_text(angle=45)) +
+        coord_flip()
+    })
+    observeEvent(input$show, {
+      showModal(modalDialog(
+        title = "About",
+        "This visualization was done by Tony Lau, using data provided by the Chicago Data protal. Data is available for download at 
+      https://data.cityofchicago.org/Transportation/Taxi-Trips-2019/h4cq-z3dy
+      Date of publication is 4/23/2022.  This was created as Project 3 of CS 424 taught by Proffessor Johnson.  This app is designed to be run on a 5760x1620 wall display, to view best in browser zoom a 1920x1080 display to 50%"
+      ))
+    })
 }
 
 # Run the application 
