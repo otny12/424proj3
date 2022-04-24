@@ -38,36 +38,8 @@ myfiles <- rbindlist(lapply(file_names, fread))
 # fixed_names <- lapply(colnames(myfiles),make.names)
 fixed_names <- c("Trip.Seconds", "Trip.Miles","Pickup.Community.Area","Dropoff.Community.Area","Company", "Trip.Start.Day","Trip.Start.Month", "Trip.Start.Hour")
 colnames(myfiles) <- fixed_names
-# temp<-rbindlist(myfiles)
-# out_val <- lapply(myfiles$Dropoff.Community.Area, table)
+companies <- read.delim("Companies.tsv")
 
-# y <- sum(seq(as.Date("2019/1/1"), as.Date("2019/12/31"), "days") == ymd(c(company_data$date)))
-# y <- aggregate(company_data, by=list(company_data$Trip.Start.Day, company_data$Trip.Start.Month),sum)
-# y <- ymd(company_data$date)
-
-# ui <- dashboardPage(
-#   dashboardHeader(),
-#   dashboardSidebar(radioButtons("to_from", "Select to see:",
-#                                 choices = list("Inflow to" = "1", "Output to" = "2"),
-#                                 selected = "1",
-#                                 inline=TRUE)
-#                    ),
-#   dashboardBody(
-#         mainPanel(
-#           column(8,fluidRow(plotOutput("map_chart"),height=200)),
-#           column(4,leafletOutput("Chicago")))
-#           
-#           
-#         )
-          # verbatimTextOutput("test1"),
-        #   plotOutput("day_chart"),
-        #   leafletOutput("Chicago"),
-        #   radioButtons("to_from", "Select to see:",
-        #                choices = list("Inflow to" = "1", "Output to" = "2"),
-        #                selected = "1",
-        #                inline=TRUE),
-        #   plotOutput("map_chart")
-        # )
 ui <- fillPage(
   fillRow(
     fillCol(plotOutput("map_chart",height ="100%"),
@@ -76,7 +48,8 @@ ui <- fillPage(
             ),
   fillCol(leafletOutput("Chicago", height = "100%")
           ),
-  fillCol(radioButtons("to_from", "Select to see:",
+  fillCol(hr(),
+    radioButtons("to_from", "Select to see:",
                                       choices = list("Inflow to" = "1", "Output to" = "2"),
                                       selected = "1",
                                       inline=TRUE
@@ -85,8 +58,8 @@ ui <- fillPage(
                        choices = list("Miles" = "1",
                                       "Km" = "2")
                        ),
-          actionButton("City", "City of Chicago")
-          
+          textOutput("text"),
+          flex = c(85,5,5,5)
           ),
   fillCol(plotOutput("day_chart"),
           plotOutput("hour_chart"),
@@ -118,6 +91,7 @@ server <- function(input, output) {
       geoj@data$value <- percentages_vec
       geoj
       })
+    
     
     
     company_data <- reactive({
@@ -164,7 +138,7 @@ server <- function(input, output) {
       y <- table(wday(company_data()$date))
       x <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday","Sunday")
       weekday_chart_data <- data.frame(x,y)
-      ggplot(weekday_chart_data, aes(x=x, y=y)) + geom_bar(stat="identity", fill="steelblue") +
+      ggplot(weekday_chart_data, aes(x=factor(x,weekdays(as.Date('1970-01-03')+1:7)), y=y)) + geom_bar(stat="identity", fill="steelblue") +
         labs(title = "Ridership For the Year of 2019 by Day of the Week", x="Day", y = "Ridership") +
         scale_y_continuous(labels = comma)
     })
@@ -173,7 +147,7 @@ server <- function(input, output) {
       y <- table(month(company_data()$date))
       x<- month.name[c(1:12)]
       month_chart_data <- data.frame(x,y)
-      ggplot(month_chart_data, aes(x=x, y=y)) + geom_bar(stat="identity", fill="steelblue") +
+      ggplot(month_chart_data, aes(x=factor(x, levels=month.name), y=y)) + geom_bar(stat="identity", fill="steelblue") +
         labs(title = "Ridership for the Year of 2019 by Month", x="Month", y = "Ridership") +
         scale_y_continuous(labels = comma)
     })
@@ -183,14 +157,18 @@ server <- function(input, output) {
                   "1" = company_data()$small_set.Trip.Miles,
                   "2" = 1.60934*(company_data()$small_set.Trip.Miles)
       )
-      ggplot(company_data(), aes(x=x)) + geom_histogram() +
-        labs(title = "Distances traveled for the Year of 2019", x="Distance", y = "Count")
+      ggplot(company_data(), aes(x=x)) + geom_histogram(colour="steelblue",fill="white",bins=20) +
+        labs(title = "Distances traveled for the Year of 2019", x="Distance", y = "Count")+
+        scale_y_continuous(labels = comma)
+      
       # max(company_data$Trip.Miles)
     })
 
     output$histo_time_chart <- renderPlot({
-      ggplot(company_data(), aes(x=small_set.Trip.Seconds)) + geom_histogram() +
-        labs(title = "Duration of Trips traveled for the Year of 2019", x="Duration", y = "Count")
+      ggplot(company_data(), aes(x=small_set.Trip.Seconds)) + geom_histogram(colour="steelblue",fill="white",bins=20) +
+        labs(title = "Duration of Trips traveled for the Year of 2019", x="Duration", y = "Count")+        
+        scale_y_continuous(labels = comma)
+
     })
     
     output$Chicago <-renderLeaflet({
@@ -204,11 +182,18 @@ server <- function(input, output) {
       #   setView(lng=-87.63144, lat=41.88094,zoom=9)
       leaflet()%>% 
           addProviderTiles(providers$Esri.WorldGrayCanvas)%>%
-          setView(lng=-87.63144, lat=41.88094,zoom=9)
+        htmlwidgets::onRender("function(el, x) {
+        L.control.zoom({ position: 'bottomleft' }).addTo(this)
+    }")%>%
+          setView(lng=-87.63144, lat=41.88094,zoom=12)
     })
     
     
     event <- reactive(input$Chicago_shape_click)
+    output$text <- renderText({
+      x <- which(geoj@data[["area_num_1"]]==strtoi(event()$id))
+      paste("Now viewing: ",geoj@data$community[x])
+    })
     
     observe({
       # #get dropoff community old way
